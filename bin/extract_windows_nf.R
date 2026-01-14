@@ -5,11 +5,13 @@ library(GenomicRanges)
 library(vroom)
 
 # Sumstats must have the following columns: chromosome, base_pair_location, p_value
+
+# Add parameters: chr_col, bp_col, pval_col
+# todo: parametrizar window_size, overlap_size e pval
 args <- commandArgs(trailingOnly = TRUE)
 
 # Inputs
 sumstats_path <- args[1]
-output_path <- args[2]
 
 sumstats <- vroom(sumstats_path)
 index_variants <- subset(sumstats, select = c("chromosome", "base_pair_location", "p_value"))
@@ -81,4 +83,4 @@ define_coloc_regions <- function(index_variants) {
 # Call function with input
 coloc_regions <- define_coloc_regions(index_variants)
 
-vroom_write(coloc_regions, output_path)
+vroom_write(coloc_regions, "windows.tsv")

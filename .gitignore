@@ -47,3 +47,16 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Other nf stuff (copied from causeway)
+.nextflow*
+work/
+data/
+results/
+null/
+.DS_Store
+testing/
+testing*
+*.pyc
+*.fastq.gz
+assets/samplesheet.csv
