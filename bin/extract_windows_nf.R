@@ -14,7 +14,7 @@ args <- commandArgs(trailingOnly = TRUE)
 sumstats_path <- args[1]
 
 sumstats <- vroom(sumstats_path)
-index_variants <- subset(sumstats, select = c("chromosome", "base_pair_location", "p_value"))
+index_variants <- subset(sumstats, select = c("chr", "bp", "p"))
 colnames(index_variants) = c("chr", "pos", "pval")
 index_variants <- index_variants %>% filter(pval < 5e-8)
 index_variants <- na.omit(index_variants)
