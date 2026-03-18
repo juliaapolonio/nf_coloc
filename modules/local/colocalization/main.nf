@@ -3,6 +3,8 @@ process COLOC {
   Perform colocalization
   """
 
+  tag "${chr}:${start}-${end}"
+
   label 'process_medium'
 
   container "${ workflow.containerEngine == 'singularity' ? 'docker://juliaapolonio/coloc:5.2.3dev':
@@ -11,10 +13,10 @@ process COLOC {
   input:
     path qtl
     path sumstats
-    path windows
+    tuple val(chr), val(start), val(end)
 
   output:
-    path "coloc_summary.csv", emit: colocalization
+    path "coloc_summary_*.csv", emit: colocalization
     path "*regional.png", optional: true, emit: regional_plot
 
   when:
@@ -23,6 +25,6 @@ process COLOC {
   script:
     """
     #!/bin/bash
-    nf_coloc.R ${sumstats} ${qtl} ${windows}
+    nf_coloc.R ${qtl} ${sumstats} ${chr} ${start} ${end}
     """
 }

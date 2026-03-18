@@ -12,100 +12,118 @@ library(ggplot2)
 
 args <- commandArgs(trailingOnly = TRUE)
 
-#qtl_path <- "/home/jamorim/scripts/nf_coloc/work/e0/29ccb1ea1422dee7a976bed00f416f/toy_eqtl_chr17.tsv"
-#gwas_path <- "/home/jamorim/scripts/nf_coloc/work/e0/29ccb1ea1422dee7a976bed00f416f/toy_gwas_chr17.tsv"
-#regions_path <- "/home/jamorim/scripts/nf_coloc/work/e0/29ccb1ea1422dee7a976bed00f416f/windows.tsv"
+qtl_path     <- args[1]
+gwas_path    <- args[2]
+region_chr   <- as.character(args[3])
+region_start <- as.numeric(args[4])
+region_end   <- as.numeric(args[5])
 
-qtl_path <- args[1]
-gwas_path <- args[2]
-regions_path <- args[3]
+
+regions <- data.frame(
+  seqnames = region_chr,
+  start = region_start,
+  end = region_end,
+  stringsAsFactors = FALSE
+)
 
 qtl <- vroom(qtl_path, col_select = c("snp", "chr", "bp", "freq", "b", "se", "p", "N", "symbol"))
 gwas <- vroom(gwas_path, col_select = c("snp", "chr", "bp", "freq", "b", "se", "p", "N"))
-regions <- vroom(regions_path)
+
+
+qtl$chr <- gsub("chr", "", as.character(qtl$chr))
+gwas$chr <- gsub("chr", "", as.character(gwas$chr))
+region_chr <- gsub("chr", "", as.character(region_chr))
+
+qtl <- qtl %>% mutate(across(c(bp, freq, b, se, p, N), as.numeric))
+gwas <- gwas %>% mutate(across(c(bp, freq, b, se, p, N), as.numeric))
+
+message("Variantes no QTL da região: ", nrow(qtl %>% dplyr::filter(chr == region_chr & bp >= region_start & bp <= region_end)))
+message("Variantes no GWAS da região: ", nrow(gwas %>% dplyr::filter(chr == region_chr & bp >= region_start & bp <= region_end)))
 
 ###### STEP 1 - Function to extract regions, split by gene and run coloc #######
 
-# Adotar convenção de header e mudar no código
-run_coloc_per_region <- function(regions, gwas_df, qtl_df) {
-  results <- list()
-  
-  for (i in seq_len(nrow(regions))) {
-    region_chr <- as.character(regions$seqnames[i])
-    region_start <- regions$start[i]
-    region_end <- regions$end[i]
-    
-    message("Processing region: ", region_chr, ":", region_start, "-", region_end)
-    
-    # Subset GWAS and QTL to region
-    gwas_sub <- gwas_df %>%
-      dplyr::filter(chr == region_chr & bp >= region_start & bp <= region_end)
-    
-    qtl_sub <- qtl_df %>%
-      dplyr::filter(chr == region_chr & bp >= region_start & bp <= region_end)
-    
-    # Inner join by position to match variants
-    merged <- inner_join(gwas_sub, qtl_sub, by = "snp", suffix = c(".gwas", ".qtl"))
-    
-    # Skip region if no overlap
-    if (nrow(merged) == 0) next
-    
-    split_by_gene <- split(merged, merged$symbol)
-    
-    for (gene in names(split_by_gene)) {
 
-      df <- split_by_gene[[gene]] %>%
-        na.omit() %>%
-        distinct(snp, .keep_all = TRUE)
-      
-      # Skip if too few SNPs
-      if (nrow(df) < 5) {
-        message("Skipped gene ", gene, ": too few overlapping variants")
-        next
-      }
-      
-      # Format for coloc.abf
-      dataset1 <- list(
-        beta = df$b.gwas,
-        varbeta = df$se.gwas^2,
-        snp = df$snp,
-        MAF = df$freq.gwas,
-        N = unique(df$N.gwas),
-        type = "quant"
-      )
-      
-      dataset2 <- list(
-        beta = df$b.qtl,
-        varbeta = df$se.qtl^2,
-        snp = df$snp,
-        MAF = df$freq.qtl,
-        N = unique(df$N.qtl),
-        type = "quant"
-      )
-      
-      coloc_out <- tryCatch({
-        coloc.abf(dataset1, dataset2)
-      }, error = function(e) {
-        message("coloc failed for gene ", gene, ": ", e$message)
-        return(NULL)
-      })
+run_coloc_per_region <- function(regions, gwas, qtl) {
+	  results <- list()
 
-      if (is.null(coloc_out)) next
-      
-      key <- paste(
-        region_chr,
-        region_start,
-        region_end,
-        gene,
-        sep = ":"
-      )
+  # Como você recebe uma região por vez, pegamos o primeiro elemento
+  region_chr <- as.character(regions$seqnames[1])
+    region_start <- as.numeric(regions$start[1])
+    region_end <- as.numeric(regions$end[1])
 
-      results[[key]] <- coloc_out
-    }
-  }
+      message("Processing region: ", region_chr, ":", region_start, "-", region_end)
 
-  results
+      # Subset GWAS and QTL to region
+      gwas_sub <- gwas %>%
+	          dplyr::filter(as.character(chr) == region_chr & bp >= region_start & bp <= region_end)
+
+	    qtl_sub <- qtl %>%
+		        dplyr::filter(as.character(chr) == region_chr & bp >= region_start & bp <= region_end)
+
+		  # VERIFICAÇÃO DE SOBREPOSIÇÃO
+		  if (nrow(gwas_sub) == 0 || nrow(qtl_sub) == 0) {
+			      warning("AVISO: Sem variantes suficientes na região para GWAS ou QTL.")
+		      return(results) # Retorna lista vazia, o que gera o CSV apenas com cabeçalho
+		        }
+
+		    # Inner join by position to match variants
+		    merged <- inner_join(gwas_sub, qtl_sub, by = "snp", suffix = c(".gwas", ".qtl"))
+
+		    # Se após o join não sobrar nada, retorna vazio com um aviso
+		    if (nrow(merged) == 0) {
+			        warning("AVISO: Nenhum SNP em comum entre GWAS e QTL nesta região.")
+		        return(results)
+			  }
+
+		      split_by_gene <- split(merged, merged$symbol)
+
+		      for (gene in names(split_by_gene)) {
+			          df <- split_by_gene[[gene]] %>%
+					        na.omit() %>%
+						      distinct(snp, .keep_all = TRUE)
+
+					          # Skip interno (dentro do loop de genes o 'next' funciona!)
+					          if (nrow(df) < 5) {
+							        message("Skipped gene ", gene, ": too few overlapping variants")
+						        next
+							    }
+
+						      # Format for coloc.abf
+						      dataset1 <- list(
+								             beta = df$b.gwas,
+									           pvalues = df$p.gwas,
+									           snp = df$snp,
+										         MAF = df$freq.gwas,
+										         N = median(df$N.gwas, na.rm = TRUE),
+											       s = 0.176,
+											       type = "cc"
+											           )
+
+						      dataset2 <- list(
+								             beta = df$b.qtl,
+									           pvalues = df$p.qtl,
+									           snp = df$snp,
+										         MAF = df$freq.qtl,
+										         N = median(df$N.qtl, na.rm = TRUE),
+											       type = "quant"
+											     )
+
+						          coloc_out <- tryCatch({
+								        coloc.abf(dataset1, dataset2)
+									    }, error = function(e) {
+										          message("coloc failed for gene ", gene, ": ", e$message)
+									      return(NULL)
+									          })
+
+						          if (!is.null(coloc_out)) {
+								        key <- paste(region_chr, region_start, region_end, gene, sep = "|")
+							        results[[key]] <- coloc_out
+								    }
+							    }
+
+		        return(results)
 }
+
 
 # Run function
 coloc_results <- run_coloc_per_region(regions, gwas, qtl)
@@ -119,35 +137,36 @@ extract_coloc_summary <- function(coloc_results) {
   summaries <- lapply(names(coloc_results), function(name) {
     result <- coloc_results[[name]]
     if (is.null(result)) return(NULL)
-    
+
     # Split region name into components
-    parts <- strsplit(name, "[:]")[[1]]
+    parts <- strsplit(name, "[|]")[[1]]
+
     if (length(parts) < 4) {
       warning("Skipping malformed name: ", name)
       return(NULL)
     }
-    
+
     chr <- parts[1]
     start <- parts[2]
     end <- parts[3]
     gene <- paste(parts[4:length(parts)], collapse = "-")
-    
+
     # Extract H3 and H4 using correct names
     summary_vals <- result$summary
     if (is.null(summary_vals) || !all(c("PP.H3.abf", "PP.H4.abf") %in% names(summary_vals))) {
       warning("Missing H3 or H4 for: ", name)
       return(NULL)
     }
-    
+
     PP.H3 <- summary_vals["PP.H3.abf"]
     PP.H4 <- summary_vals["PP.H4.abf"]
-    
+
     lead_variant <- NA
     if (!is.null(result$results) && "SNP.PP.H4" %in% names(result$results)) {
       top_snp <- result$results[which.max(result$results$SNP.PP.H4), ]
       lead_variant <- top_snp$snp
     }
-    
+
     return(data.frame(
       gene = gene,
       chr = chr,
@@ -159,7 +178,7 @@ extract_coloc_summary <- function(coloc_results) {
       stringsAsFactors = FALSE
     ))
   })
-  
+
   coloc_summary_df <- do.call(rbind, summaries)
   return(coloc_summary_df)
 }
@@ -195,8 +214,19 @@ plot_regional_coloc <- function(
   )
 
   if (nrow(plot_df) == 0) return(NULL)
-  
+
   plot_df <- as.data.frame(plot_df)
+
+  plot_df <- plot_df %>%
+	    dplyr::filter(
+		 !is.na(snp),
+		 !is.na(bp),
+		 !is.na(pgwas),
+		 !is.na(p_eqtl)
+		 )
+
+  plot_df$pgwas[plot_df$pgwas == 0] <- 5e-300
+  plot_df$p_eqtl[plot_df$p_eqtl == 0] <- 5e-300
 
   # Região centrada no SNP causal
   center <- plot_df$bp[plot_df$snp == causal_snp][1]
@@ -212,7 +242,7 @@ plot_regional_coloc <- function(
     chrom = "chr",
     pos = "bp",
     p = "pgwas"
-  ) |> link_LD(token = "5c4d1f5eeb21")
+  ) |> link_LD(token = "c800de369f83")
 
   loc_qtl <- locus(
     data = plot_df,
@@ -222,7 +252,7 @@ plot_regional_coloc <- function(
     chrom = "chr",
     pos = "bp",
     p = "p_eqtl"
-  ) |> link_LD(token = "5c4d1f5eeb21")
+  ) |> link_LD(token = "c800de369f83")
 
   g  <- gg_genetracks(loc_gwas, highlight = gene)
   pg <- gg_scatter(loc_gwas, labels = causal_snp, nudge_x = 0.1,
@@ -240,42 +270,43 @@ plot_regional_coloc <- function(
 
 h4_threshold <- 0.8
 
+if (!is.null(coloc_summary_df)) {
+  coloc_to_plot <- coloc_summary_df %>%
+    dplyr::filter(
+      !is.na(PP.H4),
+      PP.H4 >= h4_threshold
+    )
 
-coloc_to_plot <- coloc_summary_df %>%
-  dplyr::filter(
-    !is.na(PP.H4),
-    PP.H4 >= h4_threshold
-  )
+  for (i in seq_len(nrow(coloc_to_plot))) {
 
-for (i in seq_len(nrow(coloc_to_plot))) {
+    row <- coloc_to_plot[i, ]
 
-  row <- coloc_to_plot[i, ]
+    res_key <- paste(
+      row$chr,
+      row$start,
+      row$end,
+      row$gene,
+      sep = "|"
+    )
 
-  res_key <- paste(
-    row$chr,
-    row$start,
-    row$end,
-    row$gene,
-    sep = ":"
-  )
+    if (!res_key %in% names(coloc_results)) {
+      message("Chave não encontrada: ", res_key)
+      next
+    }
 
-  if (!res_key %in% names(coloc_results)) {
-    message("Chave não encontrada: ", res_key)
-    next
+    plot_regional_coloc(
+      coloc_result = coloc_results[[res_key]],
+      gwas_df = gwas,
+      qtl_df  = qtl,
+      region  = row$chr,
+      start   = row$start,
+      end     = row$end,
+      gene    = row$gene
+    )
   }
 
-  plot_regional_coloc(
-    coloc_result = coloc_results[[res_key]],
-    gwas_df = gwas,
-    qtl_df  = qtl,
-    region  = row$chr,
-    start   = row$start,
-    end     = row$end,
-    gene    = row$gene
-  )
+  write.csv(coloc_summary_df, paste0("coloc_summary_", region_chr, "_", region_start, ".csv"), row.names = FALSE)
+} else {
+  empty_df <- data.frame(gene=character(), chr=character(), start=numeric(), end=numeric(), PP.H3=numeric(), PP.H4=numeric(), variant_id=character())
+  write.csv(empty_df, paste0("coloc_summary_", region_chr, "_", region_start, ".csv"), row.names = FALSE)
 }
-
-
-write.csv(coloc_summary_df, paste0("coloc_summary.csv"), row.names = FALSE)
-
-# Outputs desse módulo: coloc_summary.csv e *_regional.png

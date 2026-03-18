@@ -21,10 +21,10 @@ workflow {
 
     WINDOWS( sumstats )
 
-    WINDOWS.out.windows
-    .flatten()
-    .set { ext_win }
+    ch_windows = WINDOWS.out.windows
+    .splitCsv(header:true, sep:'\t')
+    .map { row -> tuple(row.seqnames, row.start, row.end) }
 
-    COLOC( sumstats, qtl_file, ext_win )
+    COLOC( qtl_file, sumstats, ch_windows )
 
 }
