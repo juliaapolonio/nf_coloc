@@ -3,7 +3,7 @@ process COLOC {
   Perform colocalization
   """
 
-  tag "${chr}:${start}-${end}"
+  tag "${meta.id} - ${chr}:${start}-${end}"
 
   label 'process_medium'
 
@@ -11,13 +11,12 @@ process COLOC {
             'docker.io/juliaapolonio/coloc:5.2.3dev' }"
 
   input:
-    path qtl
     path sumstats
-    tuple val(chr), val(start), val(end)
+    tuple val(meta), path(qtl), val(chr), val(start), val(end)
 
   output:
-    path "coloc_summary_*.csv", emit: colocalization
-    path "*regional.png", optional: true, emit: regional_plot
+    path "${meta.id}_coloc_summary_*.csv", emit: colocalization
+    path "${meta.id}_*regional.png", optional: true, emit: regional_plot
 
   when:
   task.ext.when == null || task.ext.when  
@@ -25,6 +24,6 @@ process COLOC {
   script:
     """
     #!/bin/bash
-    nf_coloc.R ${qtl} ${sumstats} ${chr} ${start} ${end}
+    nf_coloc.R ${qtl} ${sumstats} ${chr} ${start} ${end} ${meta.id}
     """
 }

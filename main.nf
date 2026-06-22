@@ -16,15 +16,28 @@ include { COLOC } from "./modules/local/colocalization/main.nf"
 
 workflow {
 
+    clump_file = file(params.clump_file)
     sumstats = file(params.sumstats)
-    qtl_file = file(params.qtl_file)
 
-    WINDOWS( sumstats )
+    ch_samplesheet = Channel.fromPath(params.input)
+        .splitCsv(header: true, sep: '\t')
+        .map { row -> 
+            if( row.sample && row.qtl_file ) {
+		tuple( [ id: row.sample ], file(row.qtl_file) )
+            }
+        }
+
+    WINDOWS( clump_file )
 
     ch_windows = WINDOWS.out.windows
     .splitCsv(header:true, sep:'\t')
-    .map { row -> tuple(row.seqnames, row.start, row.end) }
+    .map { row -> tuple(row.chr, row.start, row.end) }
 
-    COLOC( qtl_file, sumstats, ch_windows )
+    ch_coloc_input = ch_samplesheet.combine(ch_windows)
+        .map { meta, qtl, chr, start, end -> 
+            tuple( meta, qtl, chr, start, end ) 
+        }
+    
+    COLOC( sumstats, ch_coloc_input )
 
 }

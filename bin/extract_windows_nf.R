@@ -4,29 +4,23 @@ library(dplyr)
 library(GenomicRanges)
 library(vroom)
 
-# Sumstats must have the following columns: chromosome, base_pair_location, p_value
-
-# Add parameters: chr_col, bp_col, pval_col
-# todo: parametrizar window_size, overlap_size e pval
 args <- commandArgs(trailingOnly = TRUE)
+clumped_path <- args[1]
 
-# Inputs
-sumstats_path <- args[1]
+clumped_data <- read.table(clumped_path, header = T) 
 
-sumstats <- vroom(sumstats_path)
-index_variants <- subset(sumstats, select = c("chr", "bp", "p"))
-colnames(index_variants) = c("chr", "pos", "pval")
-index_variants <- index_variants %>% filter(pval < 5e-8)
-index_variants <- na.omit(index_variants)
+# Selecionando e renomeando as colunas necessárias
+index_variants <- clumped_data %>%
+  select(chr = CHR, pos = BP, pval = P) %>%
+  filter(!is.na(chr) & !is.na(pos))
 
-
-# Defining function to extract windows
+# Mantivemos a função idêntica à sua lógica original de mitigação de overlaps
 define_coloc_regions <- function(index_variants) {
   # Step 1: sort by p-value
   index_variants <- index_variants %>%
     arrange(pval)
   
-  # Step 2: create 500kb windows
+  # Step 2: create 500kb windows (±250kb ao redor da variante independente)
   gr <- GRanges(seqnames = index_variants$chr,
                 ranges = IRanges(start = index_variants$pos - 250000,
                                  end = index_variants$pos + 250000),
@@ -42,7 +36,6 @@ define_coloc_regions <- function(index_variants) {
   }
   
   # Step 4: resolve region overlaps (>200kb = merge, ≤200kb = split)
-  # Sort retained by start
   retained <- sort(retained)
   
   resolved <- GRanges()
@@ -56,17 +49,17 @@ define_coloc_regions <- function(index_variants) {
       if (length(ov) > 0) {
         ov_width <- width(ov)
         if (ov_width > 200000) {
-          # Merge and move on
+          # Merge e avança
           merged <- reduce(c(current, next_region))
           current <- merged[1]
           j <- j + 1
         } else {
-          # Split the overlapping part in half
+          # Split o overlap no meio
           midpoint <- start(ov) + floor(width(ov) / 2)
           end(current) <- midpoint
           start(next_region) <- midpoint + 1
           retained[j] <- next_region
-          break  # Only split with immediate neighbor
+          break  # Splita apenas com o vizinho imediato
         }
       } else {
         break
@@ -79,8 +72,11 @@ define_coloc_regions <- function(index_variants) {
   return(as.data.frame(resolved)[, c("seqnames", "start", "end")])
 }
 
-
-# Call function with input
+# Executa a função
 coloc_regions <- define_coloc_regions(index_variants)
 
-vroom_write(coloc_regions, "windows.tsv")
+# Renomeia para manter o padrão de saída limpo
+colnames(coloc_regions) <- c("chr", "start", "end")
+
+# Salva o resultado
+vroom_write(coloc_regions, "windows.tsv", delim = "\t")

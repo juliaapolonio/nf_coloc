@@ -17,6 +17,7 @@ gwas_path    <- args[2]
 region_chr   <- as.character(args[3])
 region_start <- as.numeric(args[4])
 region_end   <- as.numeric(args[5])
+sample_id    <- as.character(args[6])
 
 
 regions <- data.frame(
@@ -80,7 +81,8 @@ run_coloc_per_region <- function(regions, gwas, qtl) {
 		      for (gene in names(split_by_gene)) {
 			          df <- split_by_gene[[gene]] %>%
 					        na.omit() %>%
-						      distinct(snp, .keep_all = TRUE)
+						      distinct(snp, .keep_all = TRUE) %>%
+						      dplyr::filter(se.gwas >= 1e-100 & se.qtl >= 1e-100)
 
 					          # Skip interno (dentro do loop de genes o 'next' funciona!)
 					          if (nrow(df) < 5) {
@@ -91,16 +93,17 @@ run_coloc_per_region <- function(regions, gwas, qtl) {
 						      # Format for coloc.abf
 						      dataset1 <- list(
 								             beta = df$b.gwas,
+									     varbeta = df$se.gwas^2,
 									           pvalues = df$p.gwas,
 									           snp = df$snp,
 										         MAF = df$freq.gwas,
 										         N = median(df$N.gwas, na.rm = TRUE),
-											       s = 0.176,
-											       type = "cc"
+											       type = "quant"
 											           )
 
 						      dataset2 <- list(
 								             beta = df$b.qtl,
+									     varbeta = df$se.qtl^2,
 									           pvalues = df$p.qtl,
 									           snp = df$snp,
 										         MAF = df$freq.qtl,
@@ -188,7 +191,7 @@ coloc_summary_df <- extract_coloc_summary(coloc_results)
 ####### STEP 3 - Regional plot for significant results #########
 plot_regional_coloc <- function(
   coloc_result, gwas_df, qtl_df,
-  region, start, end, gene,
+  region, start, end, gene, sample_id,
   h4_threshold = 0.8
 ) {
 
@@ -261,7 +264,7 @@ plot_regional_coloc <- function(
 
   plot <- cowplot::plot_grid(pq, pg, g, ncol = 1, rel_heights = c(2, 2, 1), align = "v")
 
-  outfile <- paste0(gene, "_", region, "_", start, "_", end, "_regional.png")
+  outfile <- paste0(sample_id, "_", gene, "_", region, "_", start, "_", end, "_regional.png")
 
   ggsave(outfile, plot, width = 10, height = 8)
   message("Plot saved on ", outfile)
@@ -296,17 +299,18 @@ if (!is.null(coloc_summary_df)) {
 
     plot_regional_coloc(
       coloc_result = coloc_results[[res_key]],
-      gwas_df = gwas,
-      qtl_df  = qtl,
-      region  = row$chr,
-      start   = row$start,
-      end     = row$end,
-      gene    = row$gene
+      gwas_df      = gwas,
+      qtl_df       = qtl,
+      region       = row$chr,
+      start        = row$start,
+      end          = row$end,
+      gene         = row$gene,
+      sample_id    = sample_id
     )
   }
 
-  write.csv(coloc_summary_df, paste0("coloc_summary_", region_chr, "_", region_start, ".csv"), row.names = FALSE)
+  write.csv(coloc_summary_df, paste0(sample_id, "_coloc_summary_", region_chr, "_", region_start, ".csv"), row.names = FALSE)
 } else {
   empty_df <- data.frame(gene=character(), chr=character(), start=numeric(), end=numeric(), PP.H3=numeric(), PP.H4=numeric(), variant_id=character())
-  write.csv(empty_df, paste0("coloc_summary_", region_chr, "_", region_start, ".csv"), row.names = FALSE)
+  write.csv(empty_df, paste0(sample_id, "_coloc_summary_", region_chr, "_", region_start, ".csv"), row.names = FALSE)
 }

@@ -9,7 +9,7 @@ process WINDOWS {
             'docker.io/juliaapolonio/coloc:5.2.3dev' }"
 
   input:
-    path sumstats
+    path clump_file
 
   output:
     path "windows.tsv", emit: windows
@@ -20,6 +20,6 @@ process WINDOWS {
   script:
     """
     #!/bin/bash
-    extract_windows_nf.R ${sumstats}
+    extract_windows_nf.R ${clump_file}
     """
 }
